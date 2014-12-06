@@ -19,6 +19,8 @@ class Fluent::ElasticsearchOutput < Fluent::BufferedOutput
   config_param :logstash_format, :bool, :default => false
   config_param :logstash_prefix, :string, :default => "logstash"
   config_param :logstash_dateformat, :string, :default => "%Y.%m.%d"
+  config_param :logstash_fsec_key, :string, :default => "fsec"
+  config_param :logstash_fsec_precision, :integer, :default => 3
   config_param :utc_index, :bool, :default => true
   config_param :type_name, :string, :default => "fluentd"
   config_param :index_name, :string, :default => "fluentd"
@@ -126,7 +128,25 @@ class Fluent::ElasticsearchOutput < Fluent::BufferedOutput
         if record.has_key?("@timestamp")
           time = Time.parse record["@timestamp"]
         else
-          record.merge!({"@timestamp" => Time.at(time).to_datetime.to_s})
+          time = Time.at(time)
+          fsec_precision = 0
+          # Do we have a second fraction field?
+          if record.has_key?(@logstash_fsec_key)
+            # Use that field to add the second fraction because fluentd only support
+            # second granularity timestamps (see https://github.com/fluent/fluentd/issues/461)
+            value = record.delete(@logstash_fsec_key)
+            begin
+              msec = Rational("0.#{value}")
+              log.debug "Parsed #{@logstash_fsec_key} field: #{msec} from: #{value}"
+              time = time + msec
+              fsec_precision = @logstash_fsec_precision
+            rescue ArgumentError => e
+              log.warn "Invalid #{@logstash_sec_fraction_key} value: #{value}, error = #{e.message}"
+            end
+          end
+          iso8601 = time.to_datetime.iso8601(fsec_precision)
+          log.debug "Using timestamp: #{time}, exported as: #{iso8601}"
+          record.merge!({"@timestamp" => iso8601})
         end
         if @utc_index
           target_index = "#{@logstash_prefix}-#{Time.at(time).getutc.strftime("#{@logstash_dateformat}")}"

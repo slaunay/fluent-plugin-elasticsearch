@@ -333,6 +333,66 @@ class ElasticsearchOutput < Test::Unit::TestCase
     assert_equal(index_cmds[1]['@timestamp'], ts)
   end
 
+  def test_uses_provided_timestamp_when_logstash_is_configured
+    driver.configure("logstash_format true\n")
+    stub_elastic_ping
+    stub_elastic
+    time = Time.now.to_time
+    driver.emit(sample_record, time)
+    driver.run
+    assert(index_cmds[1].has_key? '@timestamp')
+    assert_equal(index_cmds[1]['@timestamp'], time.iso8601())
+  end
+
+  def test_uses_provided_timestamp_and_fsec_field_when_logstash_is_configured
+    driver.configure("logstash_format true")
+    stub_elastic_ping
+    stub_elastic
+    time = Time.now.round
+    driver.emit(sample_record.merge!('fsec' => '123456'), time)
+    driver.run
+    assert(index_cmds[1].has_key? '@timestamp')
+    assert_equal(index_cmds[1]['@timestamp'], (time + Rational(123, 1000)).iso8601(3))
+    assert(not(index_cmds[1].has_key? 'fsec'))
+  end
+
+  def test_uses_provided_timestamp_when_logstash_is_configured_with_precision
+    driver.configure("logstash_format true
+                      logstash_fsec_key nsec
+                      logstash_fsec_precision 4")
+    stub_elastic_ping
+    stub_elastic
+    time = Time.now.round
+    driver.emit(sample_record.merge!('nsec' => '123456'), time)
+    driver.run
+    assert(index_cmds[1].has_key? '@timestamp')
+    # Note that there is a round function applied
+    assert_equal(index_cmds[1]['@timestamp'], (time + Rational(1235, 10000)).iso8601(4))
+    assert(not(index_cmds[1].has_key? 'nsec'))
+  end
+
+  def test_uses_provided_timestamp_and_invalid_fsec_field_when_logstash_is_configured
+    driver.configure("logstash_format true")
+    stub_elastic_ping
+    stub_elastic
+    time = Time.now.round
+    driver.emit(sample_record.merge!('fsec' => 'abc'), time)
+    driver.run
+    assert(index_cmds[1].has_key? '@timestamp')
+    # No fraction provided
+    assert_equal(index_cmds[1]['@timestamp'], time.iso8601(0))
+    assert(not(index_cmds[1].has_key? 'fsec'))
+  end
+
+  def test_uses_provided_timestamp_and_keep_fsec_field_when_logstash_is_not_configured
+    stub_elastic_ping
+    stub_elastic
+    driver.emit(sample_record.merge!('fsec' => '123'))
+    driver.run
+    assert(index_cmds[1].has_key? 'fsec')
+    assert_equal(index_cmds[1]['fsec'], '123')
+  end
+
   def test_doesnt_add_tag_key_by_default
     stub_elastic_ping
     stub_elastic

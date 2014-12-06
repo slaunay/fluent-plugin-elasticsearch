@@ -61,7 +61,7 @@ You can specify user and password for HTTP basic auth. If used in conjunction wi
 logstash_format true # defaults to false
 ```
 
-This is meant to make writing data into elasticsearch compatible to what logstash writes. By doing this, one could take advantade of [kibana](http://kibana.org/).
+This is meant to make writing data into elasticsearch compatible to what logstash writes. By doing this, one could take advantage of [kibana](http://kibana.org/).
 
 ```
 logstash_prefix mylogs # defaults to "logstash"
@@ -77,6 +77,47 @@ By default, when inserting records in logstash format, @timestamp is dynamically
 
 ```
 {"@timestamp":"2014-04-07T000:00:00-00:00"}
+```
+
+By default, time parsed by fluentd has [second granularity](https://github.com/fluent/fluentd/issues/461), if you want to have fraction of second precision you need to include a `fsec` field with your record that will be merged with the time field (this `fsec` field won't be pushed to elasticsearch).
+
+Example of configuration on how to publish records to elasticsearch with millisecond precision, for a log file like:
+```
+2014-12-05 15:26:20.443 foo
+2014-12-05 15:26:20.556 bar
+```
+
+use:
+```
+<source>
+  type tail
+  format /^(?<time>^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\.(?<fsec>\d{3}) (?<message>.*)/
+  time_format %Y-%m-%d %H:%M:%S
+  path /path/to/app.log
+  pos_file /path/to/app.log.pos
+  tag app.log
+</source>
+
+<match app.log>
+  type elasticsearch
+  host localhost
+  port 9200
+  logstash_format true
+  #log_level debug # if you want to check the fsec field matched and parsed
+</match>
+
+```
+
+That `fsec` key can be changed using the `logstash_fsec_key` property.
+
+```
+logstash_fsec_key msec
+```
+
+The resulting timestamp merged from the `time` and `fsec` fields is rounded to millisecond precision (3 digits), if you want a different precision you can use `logstash_fsec_precision`.
+
+```
+logstash_fsec_precision 6
 ```
 
 By default, the records inserted into index `logstash-YYMMDD`. This option allows to insert into specified index like `logstash-YYYYMM` for a monthly index.
